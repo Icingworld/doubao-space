@@ -1,0 +1,75 @@
+package httpapi
+
+import (
+	"context"
+	"database/sql"
+	"io/fs"
+	"net/http"
+	"path"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/Icingworld/doubao-space/web"
+	"github.com/gin-gonic/gin"
+)
+
+// NewRouter creates the API and embedded frontend routes.
+func NewRouter(db *sql.DB, version string, dev bool) *gin.Engine {
+	if !dev {
+		gin.SetMode(gin.ReleaseMode)
+	}
+	router := gin.New()
+	router.Use(gin.Logger(), gin.Recovery())
+
+	router.GET("/api/health", func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), time.Second)
+		defer cancel()
+		if err := db.PingContext(ctx); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "error"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "ok",
+			"service": "doubao-space",
+			"version": version,
+		})
+	})
+
+	router.GET("/api/meta", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"name":    "豆包空间",
+			"version": version,
+		})
+	})
+
+	staticServer := http.FileServer(http.FS(web.DistFS))
+	router.NoRoute(func(c *gin.Context) {
+		requestPath := path.Clean(strings.TrimPrefix(c.Request.URL.Path, "/"))
+		if strings.HasPrefix(requestPath, "api/") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+
+		if requestPath == "." {
+			c.Request.URL.Path = "/"
+			staticServer.ServeHTTP(c.Writer, c.Request)
+			return
+		}
+
+		if info, err := fs.Stat(web.DistFS, requestPath); err == nil && !info.IsDir() {
+			staticServer.ServeHTTP(c.Writer, c.Request)
+			return
+		}
+
+		// Vue Router history mode needs unknown extensionless paths to return index.html.
+		if filepath.Ext(requestPath) == "" {
+			c.Request.URL.Path = "/"
+			staticServer.ServeHTTP(c.Writer, c.Request)
+			return
+		}
+		c.Status(http.StatusNotFound)
+	})
+
+	return router
+}

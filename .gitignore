@@ -7,6 +7,14 @@
 *.dll
 *.so
 *.dylib
+/build/
+/data/
+/web/frontend/node_modules/
+
+# Vite output. Keep the bootstrap file so the Go package can compile
+# before the first frontend build.
+/web/dist/*
+!/web/dist/index.html
 
 # Test binary, built with `go test -c`
 *.test
